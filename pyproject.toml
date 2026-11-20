@@ -1,0 +1,22 @@
+[project]
+name = "thirdshift"
+version = "0.1.0"
+description = "An agent runtime, starting with a raw Model Context Protocol server."
+authors = [
+    { name = "Lokendra", email = "lokendrakushwah8051@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "footnoted",
+    "pydantic>=2.14.4",
+]
+
+[project.scripts]
+thirdshift = "thirdshift:main"
+
+[build-system]
+requires = ["uv_build>=0.12.16,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+footnoted = { git = "https://github.com/Lokendrakushwah12/footnoted" }
