@@ -1,13 +1,19 @@
 # thirdshift
 
-An agent runtime, built one layer at a time. So far: a Model Context Protocol server written
-directly against the JSON-RPC wire format, and a durable engine that runs workflows on it.
+An agent runtime, built one layer at a time: a Model Context Protocol server written directly
+against the JSON-RPC wire format, a durable engine that runs workflows on it, a team of agents
+with typed hand-offs, and a gateway that caches, routes and budgets every model call.
+
+It runs on free local models through Ollama. Several results below are negative, and are
+reported as measured.
 
 ## Run it
 
 ```sh
 uv run python tests/test_server.py
 uv run python tests/test_durable.py
+uv run python tests/test_swarm.py
+uv run python tests/test_gateway.py
 
 # Run a workflow: search the docs, wait for approval, answer with citations.
 export THIRDSHIFT_DOCS=../footnoted
@@ -15,6 +21,13 @@ uv run thirdshift run research --input '{"question": "How does a client cancel a
 uv run thirdshift approve <run id>          # or --reject
 uv run thirdshift runs                      # every run and its status
 uv run thirdshift resume                    # continue whatever can make progress
+
+# The agent team on one task, then the evals (these need the local models):
+uv run thirdshift run build --input '{"task": "Write dedupe(items) that ...", "function": "dedupe"}'
+uv run thirdshift eval-swarm evals/tasks.jsonl
+uv run thirdshift eval-routing evals/tasks.jsonl
+uv run thirdshift eval-cache evals/cache_pairs.jsonl     # no model needed
+THIRDSHIFT_GATEWAY=1 THIRDSHIFT_BUDGET=50 uv run thirdshift run build --input '...'
 
 # Serve the documentation tools from a built footnoted checkout:
 THIRDSHIFT_DOCS=../footnoted uv run thirdshift serve --allow search,ask,execute
@@ -100,6 +113,99 @@ pending -> running -> done
 The `research` workflow uses all of it: a step calls `search_docs` on the MCP server, a gate
 shows the pages found and waits for a person, and a last step calls `ask_docs`.
 
+## The agent team
+
+`swarm.py` is a `build` workflow on the durable engine: given a task, produce a tested Python
+function.
+
+| agent | what it does | hands on |
+|---|---|---|
+| researcher | searches the docs through the MCP server, notes what to use | `Research` |
+| coder | writes a script that defines the function and tests itself | `Code` |
+| runner | executes the script in the sandbox; not a model | `Execution` |
+| three reviewers | each votes on one concern: correctness, grounding, simplicity | `Review` |
+| supervisor | a fixed policy, not a model: picks the next move | `Decision` |
+
+**Typed hand-offs.** Each hand-off is a strict Pydantic model, and the whole state is validated
+on the way into and out of every step, so a malformed reply stops at the agent that produced it.
+
+**Voting and conflicts.** The supervisor applies four rules in order: a script that failed when
+run is revised whatever the votes say; otherwise the majority decides and a tie counts as an
+objection; outvoted objections are kept as dissent on an accepted result; and after three
+rounds a person decides, through the engine's approval gate.
+
+### Does the team beat one agent?
+
+Ten small tasks, each with a check the agents never see. The check judges only the function.
+
+| | passes the hidden check | model calls | seconds |
+|---|---|---|---|
+| one coder, one attempt | 7 of 10 | 10 | 23 |
+| the team | 6 of 10 | 90 | 164 |
+
+No. With a 3B model the team is slightly worse and costs nine times as much. Why:
+
+- **The model's own tests are unreliable evidence.** Its `median_of` was correct, but it asserted
+  that the median of `[-10, 4, 6, 1000, 10, 20]` is 15.0. The script failed on its own assert,
+  the supervisor's first rule sent it back, and after three rounds it was escalated. Two of the
+  five escalations were correct functions with wrong tests.
+- **Reviewers approve wrong code.** A wrong `roman` was accepted 3-0 in the first round.
+- **Revising can make things worse.** One function that was right in a single attempt was wrong
+  after the team's rounds. The team fixed none of the tasks the single coder got wrong.
+- Of the five results the reviewers accepted, four were correct.
+
+Two things the small model taught along the way: asked for code as a JSON string in a field
+named `source`, it returned a URL; renamed to `script`, it ran on in escaped newlines until the
+reply was cut off. The coder now replies in plain text.
+
+## The gateway
+
+`gateway.py` can sit in front of every model call (`THIRDSHIFT_GATEWAY=1`). In order, it:
+
+1. **Answers from the cache**: an identical prompt, or optionally one whose embedding is close.
+2. **Checks the budget**: past the soft limit every call goes to the cheapest model; past the
+   hard limit the call is refused with a `Fatal` error, so a durable run fails at once instead
+   of retrying into the limit.
+3. **Routes**: a complexity score picks the cheap or the capable model. Most of the score is the
+   Shannon entropy of the prompt's words; code and constraint words add to it.
+4. **Degrades**: if the chosen model fails, the next in the chain answers.
+5. **Records** what was spent, per day and model.
+
+### Does routing pay?
+
+The same ten tasks, one attempt each, on Qwen 2.5 1.5B (priced 1 per 1,000 tokens) and 3B
+(priced 2):
+
+| policy | tasks passed | cost | sent to the large model |
+|---|---|---|---|
+| always the small model | 6 of 10 | 3.10 | 0 |
+| always the large model | 7 of 10 | 5.33 | 10 |
+| by complexity: top half to large | 7 of 10 | 3.84 | 5 |
+| oracle: large only where small fails | 9 of 10 | 5.19 | 4 |
+
+- **Routing matched the large model's pass count at 28% lower cost**, but on ten tasks that is
+  not strong evidence: the score barely separates the tasks the small model fails (mean 0.14)
+  from those it passes (0.11).
+- **The two models fail different tasks.** The small one passed two that the large one failed,
+  which is why the oracle reaches 9. The real opportunity is "try the cheap model, check the
+  result, escalate", and that needs a checker better than the model's own tests.
+
+### Is a semantic cache safe?
+
+`eval-cache` embeds eight paraphrase pairs, which should share an answer, and eight pairs that
+differ by one word that changes the answer ("ascending" and "descending").
+
+| similarity threshold | paraphrases served from cache | wrong answers served from cache |
+|---|---|---|
+| 0.90 | 6 of 8 | 3 of 8 |
+| 0.95 | 4 of 8 | 2 of 8 |
+| 0.97 | 4 of 8 | 1 of 8 |
+| 0.99 | 1 of 8 | 1 of 8 |
+
+Not with this embedding model. There is no threshold that serves paraphrases without also
+serving a wrong answer. Exact-match caching is the default, and the semantic cache is off unless
+an embedder is passed in.
+
 ## What was checked
 
 - `tests/test_server.py` covers malformed messages, both eras, version errors, strict argument
@@ -111,6 +217,12 @@ shows the pages found and waits for a person, and a last step calls `ask_docs`.
   process finishes it. The first step ran once, the interrupted one twice.
 - The `research` workflow was run for real: search, stop at the gate, approval from a separate
   process, then a cited answer from the local model.
+- `tests/test_swarm.py` drives the team with a scripted model: the supervisor's rules, a
+  one-round approval, objections carried back to the coder, escalation to a person, and a
+  malformed reply stopped at the agent that produced it.
+- `tests/test_gateway.py` covers routing, exact and near-match caching, the soft and hard budget
+  limits, falling back when a model is down, and the kill-switch failing a durable run without
+  retries.
 - `search_docs` was called over stdio against the real footnoted index and returned the MCP
   cancellation page for "how does a client cancel a request".
 - Not checked: the server has not been run against a third-party MCP client.
@@ -129,5 +241,9 @@ shows the pages found and waits for a person, and a last step calls `ask_docs`.
   not renewed while the step runs, so a step slower than that looks dead to another worker.
 - **No retry jitter, one database file.** Fine for one machine; many workers retrying against
   one service would want jitter.
+- **Small evals.** Ten tasks and sixteen cache pairs, all written by the person who built the
+  system. Differences of one task are noise.
+- **The supervisor is a fixed policy.** It cannot weigh how convincing an objection is.
+- **Prices are made up.** Local models are free; the 1-to-2 price ratio follows model size.
 - **Tools only.** No resources, prompts, subscriptions or multi round-trip requests, and stdio
   is the only transport.

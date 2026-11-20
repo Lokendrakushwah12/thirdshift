@@ -2,6 +2,7 @@
 
 import inspect
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Literal
@@ -63,6 +64,10 @@ def _docs():
 
         _index = Index()
     return _index
+
+
+# One header line per passage, in exactly this shape, so callers can pick the pages out again.
+HEADER = re.compile(r"^\[\d+\] (?:python|mcp|claude): (\S+) \| ", re.M)
 
 
 def search_docs(args: SearchDocs) -> str:

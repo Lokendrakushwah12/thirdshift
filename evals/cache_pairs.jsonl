@@ -1,0 +1,16 @@
+{"same": true, "a": "How do I reverse a list in Python?", "b": "What's the way to reverse a Python list?"}
+{"same": true, "a": "Write a function that returns the median of a list of numbers.", "b": "Write a function returning the median value for a list of numbers."}
+{"same": true, "a": "How does a client cancel a request?", "b": "How can a client stop a request it sent?"}
+{"same": true, "a": "Explain what a context manager is.", "b": "What is a context manager? Explain."}
+{"same": true, "a": "How do I read a JSON file?", "b": "How can I load JSON from a file?"}
+{"same": true, "a": "Summarize this text in one sentence: The cat sat on the mat.", "b": "In one sentence, summarize this text: The cat sat on the mat."}
+{"same": true, "a": "Remove duplicates from a list while keeping the order.", "b": "Deduplicate a list, preserving the original order."}
+{"same": true, "a": "How do I measure how long a piece of code takes to run?", "b": "How can I time how long some code takes?"}
+{"same": false, "a": "Sort the list in ascending order.", "b": "Sort the list in descending order."}
+{"same": false, "a": "How do I read a JSON file?", "b": "How do I write a JSON file?"}
+{"same": false, "a": "Return the first n items of the list.", "b": "Return the last n items of the list."}
+{"same": false, "a": "Write a function that returns the median of a list of numbers.", "b": "Write a function that returns the mean of a list of numbers."}
+{"same": false, "a": "Is 17 a prime number?", "b": "Is 18 a prime number?"}
+{"same": false, "a": "How does a client cancel a request?", "b": "How does a server cancel a request?"}
+{"same": false, "a": "Convert Celsius to Fahrenheit.", "b": "Convert Fahrenheit to Celsius."}
+{"same": false, "a": "Find the maximum value in the list.", "b": "Find the minimum value in the list."}

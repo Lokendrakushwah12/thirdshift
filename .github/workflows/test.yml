@@ -14,3 +14,5 @@ jobs:
       # The sandbox checks need macOS and are skipped here; the protocol checks all run.
       - run: uv run python tests/test_server.py
       - run: uv run python tests/test_durable.py
+      - run: uv run python tests/test_swarm.py
+      - run: uv run python tests/test_gateway.py

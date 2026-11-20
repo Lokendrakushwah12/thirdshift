@@ -2,6 +2,7 @@
 
 from .client import call_tool
 from .durable import Fatal, Gate, Step, Workflow
+from .tools import HEADER
 
 
 def _search(state: dict) -> dict:
@@ -12,7 +13,7 @@ def _search(state: dict) -> dict:
 
 
 def _review(state: dict) -> str:
-    pages = "\n".join(line for line in state["passages"].splitlines() if line.startswith("["))
+    pages = "\n".join(f"- {page}" for page in dict.fromkeys(HEADER.findall(state["passages"])))
     return f"Question: {state['question']}\nFound:\n{pages}\nAnswer from the documentation?"
 
 
@@ -24,4 +25,6 @@ def _answer(state: dict) -> dict:
 # Search the docs, stop for a person to look at what was found, then answer with citations.
 RESEARCH = Workflow("research", (Step("search", _search), Gate("review", _review), Step("answer", _answer)))
 
-WORKFLOWS = [RESEARCH]
+from .swarm import BUILD  # noqa: E402  (imported here so the list below reads top to bottom)
+
+WORKFLOWS = [RESEARCH, BUILD]

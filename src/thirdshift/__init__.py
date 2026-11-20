@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 RUNS = Path("data/runs.db")
@@ -41,6 +42,12 @@ def main() -> None:
     approve.add_argument("--reject", action="store_true")
     approve.add_argument("--note", default="")
     sub.add_parser("resume", help="continue every run that can make progress: retries now due, and runs a dead worker left behind")
+    versus = sub.add_parser("eval-swarm", help="one coder against the full team on tasks with hidden checks (needs the local model)")
+    versus.add_argument("file", type=Path)
+    pairs = sub.add_parser("eval-cache", help="how often a semantic cache would serve a wrong answer, by threshold")
+    pairs.add_argument("file", type=Path)
+    routing = sub.add_parser("eval-routing", help="compare routing policies on the coding tasks (needs both local models)")
+    routing.add_argument("file", type=Path)
     args = parser.parse_args()
 
     if args.cmd == "serve":
@@ -52,8 +59,35 @@ def main() -> None:
         run_server(Server(scopes))
         return
 
+    if args.cmd == "eval-cache":
+        from .evals import run_cache
+
+        print(run_cache(args.file))
+        return
+
+    if args.cmd == "eval-routing":
+        from .evals import run_routing
+
+        print(run_routing(args.file))
+        return
+
+    if args.cmd == "eval-swarm":
+        from .evals import run_swarm
+
+        print(run_swarm(args.file))
+        return
+
     from .durable import Engine
     from .workflows import WORKFLOWS
+
+    if os.environ.get("THIRDSHIFT_GATEWAY"):  # send every workflow's model calls through the gateway
+        from . import llm
+        from .gateway import Gateway, Tier
+
+        RUNS.parent.mkdir(exist_ok=True)
+        limit = float(os.environ.get("THIRDSHIFT_BUDGET", "inf"))
+        tiers = [Tier("small", llm.SMALL_MODEL, 1.0), Tier("large", llm.MODEL, 2.0)]
+        llm.use(Gateway(tiers, llm.complete, RUNS.with_name("gateway.db"), soft_limit=limit * 0.8, hard_limit=limit))
 
     RUNS.parent.mkdir(exist_ok=True)
     engine = Engine(RUNS, WORKFLOWS)

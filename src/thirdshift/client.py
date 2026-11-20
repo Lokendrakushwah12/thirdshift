@@ -8,6 +8,10 @@ from .durable import Fatal
 from .server import META, MODERN, NAME, VERSION
 
 
+class ToolFailed(RuntimeError):
+    """The tool ran and reported an error. Retryable, and for some callers simply a result."""
+
+
 def call_tool(name: str, arguments: dict, scopes: str = "search", timeout: float = 300) -> str:
     """Call one tool and return its text. A protocol error is Fatal; a tool error can be retried."""
     # ponytail: starts a server per call, which costs a few seconds while the index loads.
@@ -28,5 +32,5 @@ def call_tool(name: str, arguments: dict, scopes: str = "search", timeout: float
         raise Fatal(f"{name}: {reply['error']['message']}")
     text = reply["result"]["content"][0]["text"]
     if reply["result"]["isError"]:
-        raise RuntimeError(f"{name}: {text}")
+        raise ToolFailed(f"{name}: {text}")
     return text
