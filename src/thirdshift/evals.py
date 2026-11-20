@@ -184,6 +184,7 @@ def run_swarm(path: Path) -> str:
         except Exception:
             row["solo"] = False  # an unusable reply is a failed attempt
         row["solo_calls"], row["solo_seconds"] = len(llm.calls) - calls, time.perf_counter() - start
+        row["solo_tokens"] = sum(c["prompt"] + c["completion"] for c in llm.calls[calls:])
 
         calls, start = len(llm.calls), time.perf_counter()
         with tempfile.TemporaryDirectory() as folder:
@@ -194,6 +195,7 @@ def run_swarm(path: Path) -> str:
                     time.sleep(1)
             state, status = json.loads(engine.get(run)["state"]), engine.get(run)["status"]
         row["team_calls"], row["team_seconds"] = len(llm.calls) - calls, time.perf_counter() - start
+        row["team_tokens"] = sum(c["prompt"] + c["completion"] for c in llm.calls[calls:])
         row["status"], row["rounds"] = status, state.get("round", 0)
         row["tally"] = (state.get("decision") or {}).get("tally", "")
         row["team"] = bool(state.get("code")) and _passes(state["code"]["source"], task["check"])
@@ -208,10 +210,10 @@ def run_swarm(path: Path) -> str:
     return "\n".join(
         [
             "",
-            f"| | passes the hidden check | model calls | seconds |",
-            "|---|---|---|---|",
-            f"| one coder, one attempt | {total('solo')} of {n} | {total('solo_calls')} | {total('solo_seconds'):.0f} |",
-            f"| the team | {total('team')} of {n} | {total('team_calls')} | {total('team_seconds'):.0f} |",
+            "| | passes the hidden check | model calls | tokens | seconds |",
+            "|---|---|---|---|---|",
+            f"| one coder, one attempt | {total('solo')} of {n} | {total('solo_calls')} | {total('solo_tokens')} | {total('solo_seconds'):.0f} |",
+            f"| the team | {total('team')} of {n} | {total('team_calls')} | {total('team_tokens')} | {total('team_seconds'):.0f} |",
             "",
             f"team outcomes: {len(accepted)} accepted by the reviewers "
             f"({sum(r['team'] for r in accepted)} correct, {sum(not r['team'] for r in accepted)} wrong), "

@@ -8,6 +8,10 @@ security proxy between the agents.
 It runs on free local models through Ollama. Several results below are negative, and are
 reported as measured.
 
+**[The teardown](docs/teardown.md)** covers this project and footnoted together: the verdict on
+all eleven techniques, architecture diagrams and cost per task. **[decisions.md](docs/decisions.md)**
+records the ten decisions behind them.
+
 ## Run it
 
 ```sh
@@ -142,12 +146,12 @@ rounds a person decides, through the engine's approval gate.
 
 Ten small tasks, each with a check the agents never see. The check judges only the function.
 
-| | passes the hidden check | model calls | seconds |
-|---|---|---|---|
-| one coder, one attempt | 7 of 10 | 10 | 23 |
-| the team | 6 of 10 | 90 | 164 |
+| | passes the hidden check | model calls | tokens | seconds |
+|---|---|---|---|---|
+| one coder, one attempt | 7 of 10 | 10 | 2,603 | 34 |
+| the team | 6 of 10 | 90 | 54,868 | 219 |
 
-No. With a 3B model the team is slightly worse and costs nine times as much. Why:
+No. With a 3B model the team is slightly worse and uses 21 times the tokens. Why:
 
 - **The model's own tests are unreliable evidence.** Its `median_of` was correct, but it asserted
   that the median of `[-10, 4, 6, 1000, 10, 20]` is 15.0. The script failed on its own assert,
