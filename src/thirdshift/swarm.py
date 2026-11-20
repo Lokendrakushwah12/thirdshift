@@ -20,9 +20,15 @@ from pydantic import BaseModel, ConfigDict
 from .client import ToolFailed, call_tool
 from .durable import Gate, Step, Workflow
 from .llm import ask, write
+from .proxy import Open
 from .tools import HEADER
 
 MAX_ROUNDS = 3  # attempts the coder gets before a person is asked
+
+# Every tool call and everything one agent hands another goes through this. `Open` passes it all
+# straight through; set it to a `Proxy` to mask personal data, cut out instruction-like text,
+# fence hand-offs, enforce each role's tools and keep an audit log.
+guard = Open()
 
 
 class Strict(BaseModel):
@@ -95,19 +101,23 @@ VOTE_SCHEMA = {"type": "object", "properties": {"approve": {"type": "boolean"}, 
 
 
 def researcher(state: State) -> Research:
-    passages = call_tool("search_docs", {"query": state.task, "corpus": "python", "k": 4})
+    task = guard.mask(state.task)
+    passages = guard.tool("researcher", "search_docs", {"query": task, "corpus": "python", "k": 4}, call_tool)
     pages = list(dict.fromkeys(HEADER.findall(passages)))
     try:
-        notes = ask(RESEARCH_PROMPT, f"Task: {state.task}\n\nPassages:\n{passages[:5000]}", NOTES_SCHEMA)["notes"]
+        found = guard.data(passages[:5000], "search_docs", "researcher")
+        notes = ask(RESEARCH_PROMPT, f"Task: {task}\n\nPassages:\n{found}", NOTES_SCHEMA)["notes"]
     except ValueError:
         notes = []  # research is advice: an unusable reply means the coder works without notes, not that the run dies
     return Research(notes=notes, pages=pages)
 
 
 def coder(state: State) -> Code:
-    prompt = f"Task: {state.task}\nFunction name: {state.function}\n\nResearch notes:\n" + "\n".join(f"- {n}" for n in state.research.notes)
+    notes = guard.data("\n".join(f"- {n}" for n in state.research.notes), "researcher", "coder")
+    prompt = f"Task: {guard.mask(state.task)}\nFunction name: {state.function}\n\nResearch notes:\n{notes}"
     if state.decision and state.code:  # a revision: show what was wrong with the last attempt
-        prompt += f"\n\nYour previous script:\n{state.code.source}\n\nIt must be fixed:\n" + "\n".join(f"- {f}" for f in state.decision.feedback)
+        problems = guard.data("\n".join(f"- {f}" for f in state.decision.feedback), "reviewer", "coder")
+        prompt += f"\n\nYour previous script:\n{state.code.source}\n\nIt must be fixed:\n{problems}"
     # Plain text, not JSON. Asked for the script as a JSON string, a small model either returned
     # a URL for a field named "source" or ran on in escaped newlines until the reply was cut off.
     script = write(CODER_PROMPT, prompt).strip()
@@ -118,15 +128,18 @@ def coder(state: State) -> Code:
 
 def runner(state: State) -> Execution:
     try:
-        return Execution(ok=True, output=call_tool("run_python", {"code": state.code.source}, scopes="execute"))
+        return Execution(ok=True, output=guard.tool("runner", "run_python", {"code": state.code.source}, call_tool, scopes="execute"))
     except ToolFailed as failed:  # the script failed; that is a result, not a problem with the run
         return Execution(ok=False, output=str(failed))
 
 
 def reviewers(state: State) -> list[Review]:
-    notes = "\n".join(f"- {n}" for n in state.research.notes)
+    # The script and its output are written by another agent and may address the reviewer directly.
+    notes = guard.data("\n".join(f"- {n}" for n in state.research.notes), "researcher", "reviewer")
+    script = guard.data(state.code.source, "coder", "reviewer")
+    output = guard.data(state.execution.output[-600:], "runner", "reviewer")
     ran = "It ran and printed" if state.execution.ok else "It FAILED with"
-    evidence = f"Task: {state.task}\n\nResearch notes:\n{notes}\n\nScript:\n{state.code.source}\n\n{ran}:\n{state.execution.output[-600:]}"
+    evidence = f"Task: {guard.mask(state.task)}\n\nResearch notes:\n{notes}\n\nScript:\n{script}\n\n{ran}:\n{output}"
     return [Review(reviewer=name, **ask(REVIEW_PROMPT.format(lens=lens), evidence, VOTE_SCHEMA)) for name, lens in LENSES.items()]
 
 
@@ -180,10 +193,12 @@ def _escalation(raw: dict) -> str:
 
 
 def _finish(state: State) -> dict:
+    # The only place real values come back: what is handed to the user.
+    code = Code(source=guard.unmask(state.code.source))
     if state.decision.outcome == "accept":
         dissent = f", with dissent: {'; '.join(state.decision.dissent)}" if state.decision.dissent else ""
-        return {"result": f"accepted by the reviewers {state.decision.tally} in round {state.round}{dissent}"}
-    return {"result": f"accepted by a person after {state.round} rounds; the reviewers voted {state.decision.tally}"}
+        return {"code": code, "result": f"accepted by the reviewers {state.decision.tally} in round {state.round}{dissent}"}
+    return {"code": code, "result": f"accepted by a person after {state.round} rounds; the reviewers voted {state.decision.tally}"}
 
 
 BUILD = Workflow(

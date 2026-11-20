@@ -46,6 +46,7 @@ def main() -> None:
     versus.add_argument("file", type=Path)
     pairs = sub.add_parser("eval-cache", help="how often a semantic cache would serve a wrong answer, by threshold")
     pairs.add_argument("file", type=Path)
+    sub.add_parser("eval-injection", help="can a planted comment talk the reviewers into approving wrong code? (needs the local model)")
     routing = sub.add_parser("eval-routing", help="compare routing policies on the coding tasks (needs both local models)")
     routing.add_argument("file", type=Path)
     args = parser.parse_args()
@@ -65,6 +66,12 @@ def main() -> None:
         print(run_cache(args.file))
         return
 
+    if args.cmd == "eval-injection":
+        from .evals import run_injection
+
+        print(run_injection())
+        return
+
     if args.cmd == "eval-routing":
         from .evals import run_routing
 
@@ -79,6 +86,13 @@ def main() -> None:
 
     from .durable import Engine
     from .workflows import WORKFLOWS
+
+    if os.environ.get("THIRDSHIFT_PROXY"):  # put the agent team behind the security proxy
+        from . import swarm
+        from .proxy import Proxy
+
+        RUNS.parent.mkdir(exist_ok=True)
+        swarm.guard = Proxy(RUNS.with_name("proxy.db"))
 
     if os.environ.get("THIRDSHIFT_GATEWAY"):  # send every workflow's model calls through the gateway
         from . import llm
