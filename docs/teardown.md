@@ -79,7 +79,7 @@ stateDiagram-v2
 ### The agent team
 
 ```mermaid
-flowchart LR
+flowchart TB
     task(["Task"]) --> researcher
     researcher -- "Research" --> coder
     coder -- "Code" --> runner["runner: sandbox"]
