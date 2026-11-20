@@ -13,3 +13,4 @@ jobs:
       - run: uv sync
       # The sandbox checks need macOS and are skipped here; the protocol checks all run.
       - run: uv run python tests/test_server.py
+      - run: uv run python tests/test_durable.py
